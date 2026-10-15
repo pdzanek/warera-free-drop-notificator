@@ -31,6 +31,13 @@ WEAPONS = {"knife": "common", "gun": "uncommon", "rifle": "rare",
            "sniper": "epic", "tank": "legendary", "jet": "mythic"}
 ORDER = ["common", "uncommon", "rare", "epic", "legendary", "mythic"]
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8",
+}
+
 _last_req = [0.0]
 
 
@@ -44,7 +51,8 @@ def throttle():
 def _call(url):
     throttle()
     try:
-        with urllib.request.urlopen(url, timeout=30) as r:
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=30) as r:
             return r.status, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         try:
@@ -63,6 +71,9 @@ def _parse(proc, status, text):
     except Exception:
         if status in (429, 503):
             return "retry", f"{proc}: HTTP {status} nie-JSON (limit?)"
+        if status == 403:
+            return "fatal", (f"{proc}: HTTP 403 (Cloudflare blokuje ten serwer, error 1010). "
+                             f"Uruchom skrypt na domowym PC zamiast GitHub Actions.")
         return "fatal", f"{proc}: HTTP {status} nie-JSON: {text[:200]}"
     if isinstance(p, list):
         p = p[0] if p else {}
