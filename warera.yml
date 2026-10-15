@@ -1,0 +1,27 @@
+name: warera-scan
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Skanuj okazje ZA DARMO
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python notify.py
+      - name: Zapisz stan powiadomien
+        run: |
+          git config user.name "warera-bot"
+          git config user.email "warera-bot@users.noreply.github.com"
+          git add -f notified.json || true
+          git diff --cached --quiet || (git commit -m "update notified.json" && git push)
