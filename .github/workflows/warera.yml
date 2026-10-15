@@ -18,10 +18,16 @@ jobs:
       - name: Skanuj okazje ZA DARMO
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FREE_DMG: "1000"
+          MAX_PTS_LEFT: "100"
+          SEEN_HOURS: "6"
         run: python notify.py
       - name: Zapisz stan powiadomien
         run: |
           git config user.name "warera-bot"
           git config user.email "warera-bot@users.noreply.github.com"
           git add -f notified.json || true
-          git diff --cached --quiet || (git commit -m "update notified.json" && git push)
+          git diff --cached --quiet && exit 0
+          git commit -m "update notified.json" || exit 0
+          git pull --rebase || { git rebase --abort || true; }
+          git push || echo "WARN: nie zapisano notified.json (konflikt) - powiadomienia i tak zostaly wyslane"
