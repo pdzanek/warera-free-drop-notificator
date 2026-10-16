@@ -19,6 +19,7 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_AVATAR_URL: ${{ secrets.DISCORD_AVATAR_URL }}
           FREE_DMG: "1000"
           MAX_PTS_LEFT: "100"
           SEEN_HOURS: "6"

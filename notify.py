@@ -23,6 +23,8 @@ FREE_DMG = int(os.environ.get("FREE_DMG", "1000"))
 MAX_LEFT = int(os.environ.get("MAX_PTS_LEFT", "100"))
 TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+DISCORD_USERNAME = "Jan Darmowy II"
+DISCORD_AVATAR_URL = os.environ.get("DISCORD_AVATAR_URL", "").strip()
 SEEN_HOURS = float(os.environ.get("SEEN_HOURS", "6"))
 MAX_PAGES = 15
 MIN_INTERVAL = 0.6
@@ -234,7 +236,10 @@ def discord_embeds(title, offers):
 
 
 def send_discord(webhook, embeds):
-    data = json.dumps({"embeds": embeds}).encode("utf-8")
+    payload = {"username": DISCORD_USERNAME, "embeds": embeds}
+    if DISCORD_AVATAR_URL:
+        payload["avatar_url"] = DISCORD_AVATAR_URL
+    data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         webhook, data=data, method="POST",
         headers={"Content-Type": "application/json", "User-Agent": HEADERS["User-Agent"]})
