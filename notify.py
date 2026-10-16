@@ -19,17 +19,44 @@ from email.header import Header
 API = "https://api2.warera.io/trpc"
 GAME_BATTLE = "https://app.warera.io/battle/"
 
-FREE_DMG = int(os.environ.get("FREE_DMG", "1000"))
-MAX_LEFT = int(os.environ.get("MAX_PTS_LEFT", "100"))
 TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 DISCORD_USERNAME = "Jan Darmowy II"
 DISCORD_AVATAR_URL = os.environ.get("DISCORD_AVATAR_URL", "").strip()
-SEEN_HOURS = float(os.environ.get("SEEN_HOURS", "6"))
 MAX_PAGES = 15
 MIN_INTERVAL = 0.6
 
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "notified.json")
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+DEFAULTS = {"max_pts_left": 100, "free_dmg": 1000, "seen_hours": 6}
+
+
+def load_config():
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            cfg = json.load(f)
+            if not isinstance(cfg, dict):
+                raise ValueError("config root must be an object")
+    except FileNotFoundError:
+        return dict(DEFAULTS)
+    except Exception as e:
+        print(f"WARN: bad config.json ({e}), using defaults", file=sys.stderr)
+        return dict(DEFAULTS)
+    out = dict(DEFAULTS)
+    for key in out:
+        try:
+            out[key] = float(cfg.get(key, out[key]))
+        except (TypeError, ValueError):
+            print(f"WARN: bad config.json value for {key!r}, using default", file=sys.stderr)
+    return out
+
+
+_CFG = load_config()
+
+FREE_DMG = int(os.environ.get("FREE_DMG", _CFG["free_dmg"]))
+MAX_LEFT = int(os.environ.get("MAX_PTS_LEFT", _CFG["max_pts_left"]))
+SEEN_HOURS = float(os.environ.get("SEEN_HOURS", _CFG["seen_hours"]))
 
 WEAPONS = {"knife": "common", "gun": "uncommon", "rifle": "rare",
            "sniper": "epic", "tank": "legendary", "jet": "mythic"}
