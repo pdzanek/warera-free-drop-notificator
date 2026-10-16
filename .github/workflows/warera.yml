@@ -1,8 +1,7 @@
 name: warera-scan
 on:
-  schedule:
-    # Off-peak minutes: GitHub's scheduler is congested at :00/:15/:30/:45.
-    - cron: "7,22,37,52 * * * *"
+  # Triggered externally (cron-job.org) through the workflow_dispatch API.
+  # The built-in schedule trigger is intentionally not used (unreliable).
   workflow_dispatch:
 
 permissions:
