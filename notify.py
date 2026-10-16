@@ -258,7 +258,6 @@ def discord_embeds(title, offers):
         "title": title[:256],
         "color": 0xFFD700,
         "fields": fields[:25],
-        "footer": {"text": "WarEra free-drop notificator"},
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }]
 
@@ -366,9 +365,8 @@ def main():
     else:
         noun = "okazji"
     title = f"\U0001F389 WarEra ZA DARMO: {n} {noun}"
-    # Discord renders :jew: as a server emoji; ntfy would show it literally,
-    # so only the embed gets the emoji version of the title.
-    discord_title = title.replace("WarEra", ":jew:")
+    # No project name in the Discord title (custom emoji did not render).
+    discord_title = title.replace("WarEra ", "")
     body = "\n\n".join(lines)
     print(title + "\n" + body)
     if not TOPIC and not DISCORD_WEBHOOK:
