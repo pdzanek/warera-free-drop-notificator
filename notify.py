@@ -29,7 +29,7 @@ MIN_INTERVAL = 0.6
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "notified.json")
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
-DEFAULTS = {"max_pts_left": 100, "free_dmg": 1000, "seen_hours": 6}
+DEFAULTS = {"max_pts_left": 100, "free_dmg": 1500, "seen_hours": 3}
 
 
 def load_config():
@@ -226,6 +226,29 @@ def save_state(st):
         print(f"WARN: nie zapisano notified.json: {e}", file=sys.stderr)
 
 
+def dedupe_offers(best, saved, now):
+    # Drop offers already notified within SEEN_HOURS, unless the entry is
+    # now at most half the previously notified damage (twice as cheap).
+    # State values may be plain timestamps (format before damage tracking).
+    state = {}
+    for k, v in saved.items():
+        entry = v if isinstance(v, dict) else {"at": v, "need": None}
+        try:
+            at = float(entry.get("at", 0))
+        except (TypeError, ValueError):
+            continue
+        if now - at < SEEN_HOURS * 3600:
+            state[k] = entry
+    fresh = []
+    for o in best:
+        key = f"{o['battle'].get('_id')}:{o['rarity']}"
+        prev_need = state.get(key, {}).get("need")
+        if key not in state or (isinstance(prev_need, (int, float)) and o["need"] * 2 <= prev_need):
+            fresh.append(o)
+            state[key] = {"at": now, "need": o["need"]}
+    return fresh, state
+
+
 def send_ntfy(topic, title, body, click):
     # HTTP headers are latin-1, so encode the title as a single RFC 2047
     # base64 word (ntfy decodes it). Built manually on purpose: str(Header)
@@ -335,13 +358,7 @@ def main():
         best.append(o)
 
     now = time.time()
-    state = {k: v for k, v in load_state().items() if now - v < SEEN_HOURS * 3600}
-    fresh = []
-    for o in best:
-        key = f"{o['battle'].get('_id')}:{o['rarity']}"
-        if key not in state:
-            fresh.append(o)
-            state[key] = now
+    fresh, state = dedupe_offers(best, load_state(), now)
     save_state(state)
 
     if not fresh:
