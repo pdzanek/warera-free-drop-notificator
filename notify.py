@@ -22,6 +22,7 @@ GAME_BATTLE = "https://app.warera.io/battle/"
 FREE_DMG = int(os.environ.get("FREE_DMG", "1000"))
 MAX_LEFT = int(os.environ.get("MAX_PTS_LEFT", "100"))
 TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
+DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 SEEN_HOURS = float(os.environ.get("SEEN_HOURS", "6"))
 MAX_PAGES = 15
 MIN_INTERVAL = 0.6
@@ -207,6 +208,40 @@ def send_ntfy(topic, title, body, click):
         r.read()
 
 
+def eta_mins(o):
+    t = o["timing"]
+    per = t["perTick"] if t["perTick"] > 0 else 1
+    return max(1, -(-(o["winPts"] - max(t["atk"], t["def"])) // per)) * 2
+
+
+def discord_embeds(title, offers):
+    fields = []
+    for o in offers:
+        t = o["timing"]
+        name = (f"{flag(o['names']['atkCode'])}→{flag(o['names']['defCode'])} "
+                f"{o['names']['region'] or o['names']['type']} · {o['rarity']}")
+        value = (f"**{o['need']} dmg** · R{t['no']} {t['wonA']}:{t['wonD']} "
+                 f"· ~{eta_mins(o)} min\n"
+                 f"[Otwórz bitwę]({GAME_BATTLE}{o['battle'].get('_id')})")
+        fields.append({"name": name[:256], "value": value[:1024], "inline": False})
+    return [{
+        "title": title[:256],
+        "color": 0xFFD700,
+        "fields": fields[:25],
+        "footer": {"text": "WarEra free-drop notificator"},
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }]
+
+
+def send_discord(webhook, embeds):
+    data = json.dumps({"embeds": embeds}).encode("utf-8")
+    req = urllib.request.Request(
+        webhook, data=data, method="POST",
+        headers={"Content-Type": "application/json", "User-Agent": HEADERS["User-Agent"]})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        r.read()
+
+
 def main():
     cfg = trpc("gameConfig.getGameConfig")
     round_div = (cfg.get("loot") or {}).get("damagePerLootItem", 200000)
@@ -284,8 +319,7 @@ def main():
     lines = []
     for o in fresh:
         t = o["timing"]
-        per = t["perTick"] if t["perTick"] > 0 else 1
-        mins = max(1, -(-(o["winPts"] - max(t["atk"], t["def"])) // per)) * 2
+        mins = eta_mins(o)
         lines.append(
             f"{flag(o['names']['atkCode'])}→{flag(o['names']['defCode'])} "
             f"{o['names']['region'] or o['names']['type']} · {o['rarity']} · "
@@ -301,11 +335,15 @@ def main():
     title = f"\U0001F389 WarEra ZA DARMO: {n} {noun}"
     body = "\n\n".join(lines)
     print(title + "\n" + body)
-    if not TOPIC:
-        print("[dry-run] brak NTFY_TOPIC - nie wyslano.", file=sys.stderr)
+    if not TOPIC and not DISCORD_WEBHOOK:
+        print("[dry-run] brak NTFY_TOPIC i DISCORD_WEBHOOK_URL - nie wyslano.", file=sys.stderr)
         return
-    send_ntfy(TOPIC, title, body, f"{GAME_BATTLE}{fresh[0]['battle'].get('_id')}")
-    print("wyslano na telefon.")
+    if TOPIC:
+        send_ntfy(TOPIC, title, body, f"{GAME_BATTLE}{fresh[0]['battle'].get('_id')}")
+        print("wyslano na telefon.")
+    if DISCORD_WEBHOOK:
+        send_discord(DISCORD_WEBHOOK, discord_embeds(title, fresh))
+        print("wyslano na Discorda.")
 
 
 if __name__ == "__main__":
