@@ -29,7 +29,7 @@ MIN_INTERVAL = 0.6
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "notified.json")
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
-DEFAULTS = {"max_pts_left": 100, "free_dmg": 1500, "seen_hours": 3}
+DEFAULTS = {"max_pts_left": 100, "free_dmg": 1500, "seen_minutes": 180}
 
 
 def load_config():
@@ -49,6 +49,11 @@ def load_config():
             out[key] = float(cfg.get(key, out[key]))
         except (TypeError, ValueError):
             print(f"WARN: bad config.json value for {key!r}, using default", file=sys.stderr)
+    if "seen_minutes" not in cfg and "seen_hours" in cfg:
+        try:
+            out["seen_minutes"] = float(cfg["seen_hours"]) * 60
+        except (TypeError, ValueError):
+            print("WARN: bad config.json value for 'seen_hours', using default", file=sys.stderr)
     return out
 
 
@@ -56,7 +61,12 @@ _CFG = load_config()
 
 FREE_DMG = int(os.environ.get("FREE_DMG", _CFG["free_dmg"]))
 MAX_LEFT = int(os.environ.get("MAX_PTS_LEFT", _CFG["max_pts_left"]))
-SEEN_HOURS = float(os.environ.get("SEEN_HOURS", _CFG["seen_hours"]))
+if "SEEN_MINUTES" in os.environ:
+    SEEN_MINUTES = float(os.environ["SEEN_MINUTES"])
+elif "SEEN_HOURS" in os.environ:
+    SEEN_MINUTES = float(os.environ["SEEN_HOURS"]) * 60
+else:
+    SEEN_MINUTES = float(_CFG["seen_minutes"])
 
 WEAPONS = {"knife": "common", "gun": "uncommon", "rifle": "rare",
            "sniper": "epic", "tank": "legendary", "jet": "mythic"}
@@ -227,7 +237,7 @@ def save_state(st):
 
 
 def dedupe_offers(best, saved, now):
-    # Drop offers already notified within SEEN_HOURS, unless the entry is
+    # Drop offers already notified within SEEN_MINUTES, unless the entry is
     # now at most half the previously notified damage (twice as cheap).
     # State values may be plain timestamps (format before damage tracking).
     state = {}
@@ -237,7 +247,7 @@ def dedupe_offers(best, saved, now):
             at = float(entry.get("at", 0))
         except (TypeError, ValueError):
             continue
-        if now - at < SEEN_HOURS * 3600:
+        if now - at < SEEN_MINUTES * 60:
             state[k] = entry
     fresh = []
     for o in best:
@@ -341,7 +351,7 @@ def collect_stale_discord_ids(saved, now):
             at = float(v.get("at", 0))
         except (TypeError, ValueError):
             continue
-        if now - at >= SEEN_HOURS * 3600:
+        if now - at >= SEEN_MINUTES * 60:
             ids.append(v["discord_id"])
     return ids
 
