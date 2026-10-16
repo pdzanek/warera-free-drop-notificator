@@ -20,6 +20,7 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_AVATAR_URL: ${{ secrets.DISCORD_AVATAR_URL }}
+          DISCORD_USERNAME: ${{ secrets.DISCORD_USERNAME }}
         run: python notify.py
       - name: Save notification state
         run: |

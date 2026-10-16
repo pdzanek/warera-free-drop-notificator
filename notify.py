@@ -21,7 +21,7 @@ GAME_BATTLE = "https://app.warera.io/battle/"
 
 TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
-DISCORD_USERNAME = "Jan Darmowy II"
+DISCORD_USERNAME = os.environ.get("DISCORD_USERNAME", "").strip() or "Jan Darmowy II"
 DISCORD_AVATAR_URL = os.environ.get("DISCORD_AVATAR_URL", "").strip()
 MAX_PAGES = 15
 MIN_INTERVAL = 0.6
@@ -366,6 +366,9 @@ def main():
     else:
         noun = "okazji"
     title = f"\U0001F389 WarEra ZA DARMO: {n} {noun}"
+    # Discord renders :jew: as a server emoji; ntfy would show it literally,
+    # so only the embed gets the emoji version of the title.
+    discord_title = title.replace("WarEra", ":jew:")
     body = "\n\n".join(lines)
     print(title + "\n" + body)
     if not TOPIC and not DISCORD_WEBHOOK:
@@ -381,7 +384,7 @@ def main():
             print(f"WARN: nie wyslano na telefon: {e}", file=sys.stderr)
     if DISCORD_WEBHOOK:
         try:
-            send_discord(DISCORD_WEBHOOK, discord_embeds(title, fresh))
+            send_discord(DISCORD_WEBHOOK, discord_embeds(discord_title, fresh))
             print("wyslano na Discorda.")
         except Exception as e:
             errors.append(f"discord: {e}")
