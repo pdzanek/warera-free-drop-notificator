@@ -14,6 +14,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from email.header import Header
 
 API = "https://api2.warera.io/trpc"
 GAME_BATTLE = "https://app.warera.io/battle/"
@@ -196,9 +197,12 @@ def save_state(st):
 
 
 def send_ntfy(topic, title, body, click):
+    # Naglowki HTTP to latin-1, wiec tytul kodujemy RFC 2047 (ntfy to dekoduje).
+    # Dzieki temu polskie znaki i emoji przechodza bez zmian.
+    safe_title = str(Header(title, "utf-8"))
     req = urllib.request.Request(
         f"https://ntfy.sh/{topic}", data=body.encode("utf-8"), method="POST",
-        headers={"Title": title, "Priority": "high", "Tags": "tada", "Click": click})
+        headers=dict(HEADERS, **{"Title": safe_title, "Priority": "high", "Tags": "tada", "Click": click}))
     with urllib.request.urlopen(req, timeout=30) as r:
         r.read()
 
