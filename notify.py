@@ -243,7 +243,9 @@ def dedupe_offers(best, saved, now):
     for o in best:
         key = f"{o['battle'].get('_id')}:{o['rarity']}"
         prev_need = state.get(key, {}).get("need")
+        o["price_drop"] = False
         if key not in state or (isinstance(prev_need, (int, float)) and o["need"] * 2 <= prev_need):
+            o["price_drop"] = key in state
             fresh.append(o)
             state[key] = {"at": now, "need": o["need"]}
     return fresh, state
@@ -271,7 +273,8 @@ def discord_embeds(title, offers):
     fields = []
     for o in offers:
         t = o["timing"]
-        name = (f"{flag(o['names']['atkCode'])}→{flag(o['names']['defCode'])} "
+        drop = "\U0001F4C9 " if o.get("price_drop") else ""
+        name = (f"{drop}{flag(o['names']['atkCode'])}→{flag(o['names']['defCode'])} "
                 f"{o['names']['region'] or o['names']['type']} · {o['rarity']}")
         value = (f"**{o['need']} dmg** · R{t['no']} {t['wonA']}:{t['wonD']} "
                  f"· ~{eta_mins(o)} min\n"
@@ -369,8 +372,9 @@ def main():
     for o in fresh:
         t = o["timing"]
         mins = eta_mins(o)
+        drop = "\U0001F4C9 " if o.get("price_drop") else ""
         lines.append(
-            f"{flag(o['names']['atkCode'])}→{flag(o['names']['defCode'])} "
+            f"{drop}{flag(o['names']['atkCode'])}→{flag(o['names']['defCode'])} "
             f"{o['names']['region'] or o['names']['type']} · {o['rarity']} · "
             f"{o['need']} dmg · R{t['no']} {t['wonA']}:{t['wonD']} · ~{mins} min\n"
             f"{GAME_BATTLE}{o['battle'].get('_id')}")
@@ -381,7 +385,10 @@ def main():
         noun = "okazje"
     else:
         noun = "okazji"
-    title = f"\U0001F389 WarEra ZA DARMO: {n} {noun}"
+    if fresh and all(o.get("price_drop") for o in fresh):
+        title = f"\U0001F4C9 Jeszcze taniej: {n} {noun}"
+    else:
+        title = f"\U0001F389 WarEra ZA DARMO: {n} {noun}"
     # No project name in the Discord title (custom emoji did not render).
     discord_title = title.replace("WarEra ", "")
     body = "\n\n".join(lines)
