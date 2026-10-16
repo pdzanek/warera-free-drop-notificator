@@ -244,8 +244,11 @@ def dedupe_offers(best, saved, now):
         key = f"{o['battle'].get('_id')}:{o['rarity']}"
         prev_need = state.get(key, {}).get("need")
         o["price_drop"] = False
+        o["replace_discord_id"] = None
         if key not in state or (isinstance(prev_need, (int, float)) and o["need"] * 2 <= prev_need):
             o["price_drop"] = key in state
+            if key in state:
+                o["replace_discord_id"] = state[key].get("discord_id")
             fresh.append(o)
             state[key] = {"at": now, "need": o["need"]}
     return fresh, state
@@ -289,15 +292,58 @@ def discord_embeds(title, offers):
 
 
 def send_discord(webhook, embeds):
+    # ?wait=true makes Discord return the posted message (with its id).
     payload = {"username": DISCORD_USERNAME, "embeds": embeds}
     if DISCORD_AVATAR_URL:
         payload["avatar_url"] = DISCORD_AVATAR_URL
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        webhook, data=data, method="POST",
+        webhook + "?wait=true", data=data, method="POST",
         headers={"Content-Type": "application/json", "User-Agent": HEADERS["User-Agent"]})
     with urllib.request.urlopen(req, timeout=30) as r:
-        r.read()
+        try:
+            return json.loads(r.read().decode("utf-8")).get("id")
+        except Exception:
+            return None
+
+
+def delete_discord_message(webhook, message_id):
+    req = urllib.request.Request(
+        f"{webhook}/messages/{message_id}", method="DELETE",
+        headers={"User-Agent": HEADERS["User-Agent"]})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            r.read()
+        return True
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return True  # already gone (manual delete, replaced webhook)
+        raise
+
+
+def cleanup_discord_messages(webhook, message_ids):
+    # Best effort: cleanup must never fail the notification run.
+    for mid in dict.fromkeys(message_ids):
+        if not mid:
+            continue
+        try:
+            delete_discord_message(webhook, mid)
+        except Exception as e:
+            print(f"WARN: nie usunieto wiadomosci Discord {mid}: {e}", file=sys.stderr)
+
+
+def collect_stale_discord_ids(saved, now):
+    ids = []
+    for v in saved.values():
+        if not isinstance(v, dict) or not v.get("discord_id"):
+            continue
+        try:
+            at = float(v.get("at", 0))
+        except (TypeError, ValueError):
+            continue
+        if now - at >= SEEN_HOURS * 3600:
+            ids.append(v["discord_id"])
+    return ids
 
 
 def main():
@@ -361,8 +407,12 @@ def main():
         best.append(o)
 
     now = time.time()
-    fresh, state = dedupe_offers(best, load_state(), now)
+    saved = load_state()
+    stale_ids = collect_stale_discord_ids(saved, now) if DISCORD_WEBHOOK else []
+    fresh, state = dedupe_offers(best, saved, now)
     save_state(state)
+    if DISCORD_WEBHOOK:
+        cleanup_discord_messages(DISCORD_WEBHOOK, stale_ids)
 
     if not fresh:
         print("brak nowych okazji ZA DARMO.")
@@ -406,8 +456,18 @@ def main():
             print(f"WARN: nie wyslano na telefon: {e}", file=sys.stderr)
     if DISCORD_WEBHOOK:
         try:
-            send_discord(DISCORD_WEBHOOK, discord_embeds(discord_title, fresh))
+            message_id = send_discord(DISCORD_WEBHOOK, discord_embeds(discord_title, fresh))
             print("wyslano na Discorda.")
+            replaced = [o.get("replace_discord_id") for o in fresh]
+            if message_id:
+                for o in fresh:
+                    key = f"{o['battle'].get('_id')}:{o['rarity']}"
+                    if key in state:
+                        state[key]["discord_id"] = message_id
+                save_state(state)
+            owned = {e.get("discord_id") for e in state.values() if isinstance(e, dict)}
+            cleanup_discord_messages(
+                DISCORD_WEBHOOK, [mid for mid in replaced if mid and mid not in owned])
         except Exception as e:
             errors.append(f"discord: {e}")
             print(f"WARN: nie wyslano na Discorda: {e}", file=sys.stderr)
