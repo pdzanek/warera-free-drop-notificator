@@ -138,10 +138,14 @@
       helmet: "Helmet", chest: "Chest", boots: "Boots",
       gloves: "Gloves", pants: "Pants",
     };
+    const N_RARE = 10, NEED_RARE = 20000, N_EPIC = 5, NEED_EPIC = 50000;
+    const MAX_PAGES_PER_RANKING = 15; // 15x100 = 1500 spots; more = too slow + 100/min rate limit
+    const TICK_MIN = 2; // assumption: one tick every ~2 min (observed from nextTickAt)
+    const H12 = 12 * 3600 * 1000;
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    // Anonimowy limit API: 100 req/min. 600 ms odstępu = ~100/min teoretycznie,
-    // chwilowe 429 łapie retry z backoffem w trpc().
+    // Anonymous API limit: 100 req/min. 600 ms spacing = ~100/min in theory,
+    // transient 429s are caught by retry with backoff in trpc().
     const MIN_INTERVAL_MS = 600;
     let lastReqAt = 0;
     async function throttle() {
@@ -172,8 +176,14 @@
       return /invalid_type|Required|Expected|too_big|too_small/i.test(msg || "");
     }
 
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+
     async function trpc(proc, input) {
-      // Legacy ?input={...} działa na tym API; json-wrapped tylko jako fallback przy 400-validation.
+      // Legacy ?input={...} works on this API; json-wrapped only as fallback on 400-validation.
       const legacy = input === undefined
         ? `${API}/${proc}`
         : `${API}/${proc}?input=${encodeURIComponent(JSON.stringify(input))}`;
@@ -182,7 +192,7 @@
         : `${API}/${proc}?input=${encodeURIComponent(JSON.stringify({ json: input }))}`;
 
       let lastErr = null;
-      // Próby: legacy (+retry na 429), potem ewentualnie wrapped.
+      // Attempts: legacy (+retry on 429), then optionally wrapped.
       for (let attempt = 0; attempt < 6; attempt++) {
         let res, text;
         try {
@@ -198,7 +208,7 @@
           if (res.status === 429 || res.status === 503) { await sleep(2000 * (attempt + 1)); continue; }
           throw lastErr;
         }
-        // Nielimitowy rate-limit: {"status":429,"message":"..."}
+        // Non-limit rate limit: {"status":429,"message":"..."}
         if (payload && (payload.status === 429 || payload.statusCode === 429)) {
           const msg = payload.message || "Rate limit";
           lastErr = new Error(`${proc}: HTTP 429 ${String(msg).slice(0, 160)}`);
@@ -209,13 +219,13 @@
           const msg = typeof payload.error.message === "string"
             ? payload.error.message
             : JSON.stringify(payload.error).slice(0, 300);
-          // 429 w stylu tRPC
+          // 429 in tRPC style
           if (res.status === 429 || /rate limit|too many/i.test(msg)) {
             lastErr = new Error(`${proc}: HTTP 429 ${msg.slice(0, 160)}`);
             await sleep(2500 * (attempt + 1));
             continue;
           }
-          // Zły format inputu -> jedyny przypadek kiedy próbujemy wrapped
+          // Bad input format -> the only case when we try wrapped
           if (res.status === 400 && wrapped && isValidation400(msg)) break;
           throw new Error(`${proc}: HTTP ${res.status} ${msg.slice(0, 300)}`);
         }
@@ -226,7 +236,7 @@
         lastErr = new Error(`${proc}: HTTP ${res.status} nieoczekiwany kształt: ${text.slice(0, 200)}`);
         throw lastErr;
       }
-      // Fallback: format wrapped (1 próba + retry na 429)
+      // Fallback: wrapped format (1 attempt + retry on 429)
       if (wrapped) {
         for (let attempt = 0; attempt < 4; attempt++) {
           const { res, text } = await fetchOnce(wrapped);
@@ -310,8 +320,6 @@
       return all.filter((b) => b.isActive).filter((b, idx, arr) => arr.findIndex((x) => x._id === b._id) === idx);
     }
 
-    const MAX_PAGES_PER_RANKING = 15; // 15x100 = 1500 miejsc; więcej = za wolno + rate-limit 100/min
-
     async function rankingPages(query, payingSlots, onTick) {
       const rows = [];
       let cursor;
@@ -357,7 +365,7 @@
       return String.fromCodePoint(...[...code.toUpperCase()].map((c) => 127397 + c.charCodeAt(0)));
     }
 
-    // Kraje/regiony prawie się nie zmieniają — cache 12 h, oszczędza 2 throttled requesty.
+    // Countries/regions barely change — 12h cache, saves 2 throttled requests.
     function cached(key, ttlMs, fetcher) {
       try {
         const raw = localStorage.getItem(key);
@@ -365,21 +373,16 @@
           const { at, data } = JSON.parse(raw);
           if (Date.now() - at < ttlMs) return Promise.resolve(data);
         }
-      } catch (e) { /* brak cache — pobierz */ }
+      } catch (e) { /* no cache — fetch */ }
       return fetcher().then((d) => {
-        try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), data: d })); } catch (e) { /* quota — trudno */ }
+        try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), data: d })); } catch (e) { /* quota — ignore */ }
         return d;
       });
     }
-    const H12 = 12 * 3600 * 1000;
 
     function roundDamage(battle) {
       const r = battle.currentRound || {};
       return (r.attacker?.damages || 0) + (r.defender?.damages || 0);
-    }
-
-    function battleDamage(battle) {
-      return (battle.attacker?.damages || 0) + (battle.defender?.damages || 0) + roundDamage(battle);
     }
 
     function roundTiming(battle) {
@@ -398,7 +401,6 @@
       const p = Number(perTick) > 0 ? Number(perTick) : 1;
       return Math.max(1, Math.ceil(left / p));
     }
-    const TICK_MIN = 2; // założenie: tick co ~2 min (z obserwacji nextTickAt)
 
     const $ = (id) => document.getElementById(id);
 
@@ -408,7 +410,6 @@
       const tbodyRare = $("rows-rare");
       const tbodyEpic = $("rows-epic");
       const empty = $("empty");
-      const N_RARE = 10, N_EPIC = 5;
       btn.disabled = true;
       tbodyRare.innerHTML = "";
       tbodyEpic.innerHTML = "";
@@ -427,7 +428,6 @@
           cached("warera_regions", H12, () => trpc("region.getRegionsObject")),
         ]);
         const roundDiv = cfg.loot?.damagePerLootItem || 200000;
-        const battleDiv = cfg.loot?.battleLootDamagePerLootItem || 500000;
         const winPts = cfg.battle?.pointsToWinRound || 300;
         const countries = Object.fromEntries((countriesRaw || []).map((c) => [c._id, c]));
 
@@ -435,9 +435,9 @@
         const battles = await allBattles((m) => { status.textContent = m; });
         status.textContent = `Żywych bitew: ${battles.length}. Pobieram rankingi…`;
 
-        // Prefiltr za darmo (bez requestów): tylko bitwy blisko końca rundy.
-        // Tylko loot z RUNDY — loot z całej bitwy rozlicza się w innym momencie
-        // (koniec bitwy, nie rundy), więc nie pasuje do kolumny ETA.
+        // Free pre-filter (no requests): only battles near the end of the round.
+        // Only ROUND loot — full-battle loot settles at a different time
+        // (end of battle, not round), so it does not fit the ETA column.
         const candidates = [];
         for (const battle of battles) {
           const timing = roundTiming(battle);
@@ -448,10 +448,10 @@
           const roundSlots = Math.floor(rd / roundDiv);
           const roundId = battle.currentRound?._id;
           if (roundId && roundSlots > 0) {
-            candidates.push({ battle, names, channel: "runda", idKey: "roundId", id: roundId, slots: roundSlots, totalDmg: rd, div: roundDiv, timing, left });
+            candidates.push({ battle, names, channel: "round", idKey: "roundId", id: roundId, slots: roundSlots, totalDmg: rd, div: roundDiv, timing, left });
           }
         }
-        // Najpilniejsze najpierw — pierwsze karty pojawiają się najszybciej.
+        // Most urgent first — first cards appear as soon as possible.
         candidates.sort((a, b) => a.left - b.left);
         const jobs = candidates;
         if (!jobs.length) {
@@ -470,8 +470,6 @@
           jobErrors ? `${jobErrors} rankingów z błędem${lastJobError ? ` (ost: ${lastJobError.slice(0, 120)})` : ""}` : "",
           truncatedJobs ? `ucięto ${truncatedJobs} rankingów >1500 miejsc` : "",
         ].filter(Boolean).join(" · ");
-
-        const N_RARE = 10, NEED_RARE = 20000, N_EPIC = 5, NEED_EPIC = 50000;
 
         function topGroup(rarity, n, maxNeed) {
           const sorted = offers
@@ -502,9 +500,10 @@
         function rowHtml(o) {
           const b = o.battle;
           const href = `${GAME}/battle/${b._id}`;
-          const title = o.names.region
+          const rawTitle = o.names.region
             ? `${o.names.region} · ${o.names.type}`
             : `${o.names.type} ${b._id.slice(-6)}`;
+          const title = escapeHtml(rawTitle);
           const t = o.timing || {};
           const maxPts = Math.max(Number(t.atk || 0), Number(t.def || 0));
           const left = Math.max(0, (o.winPts || 300) - maxPts);
@@ -513,7 +512,7 @@
           const free = o.need < 1000;
           return `<div class="card${urgent ? " urgent" : ""}${free ? " free" : ""}">
             <div class="top">
-              <span class="flags" title="${o.names.atk} → ${o.names.def}">${flagEmoji(o.names.atkCode)}→${flagEmoji(o.names.defCode)}</span>
+              <span class="flags" title="${escapeHtml(o.names.atk)} → ${escapeHtml(o.names.def)}">${flagEmoji(o.names.atkCode)}→${flagEmoji(o.names.defCode)}</span>
               <span class="bname"><a href="${href}" target="_blank" rel="noreferrer">${title}</a></span>
             </div>
             ${free

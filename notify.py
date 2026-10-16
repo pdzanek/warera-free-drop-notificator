@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""WarEra: powiadomienie na telefon, gdy pojawi sie wejscie 'ZA DARMO' (<1000 dmg).
+"""WarEra: phone notification when a 'FREE' entry appears (<1000 dmg).
 
-Uzycie lokalne:  NTFY_TOPIC=moj-temat python notify.py
-Na GitHub Actions topic idzie z secrets.NTFY_TOPIC (patrz .github/workflows/warera.yml).
+Local usage:  NTFY_TOPIC=my-topic python notify.py
+On GitHub Actions the topic comes from secrets.NTFY_TOPIC (see .github/workflows/warera.yml).
 
-Wymaga tylko standardowej biblioteki Pythona. Na telefonie: apka ntfy + subskrypcja tego samego tematu.
+Requires only the Python standard library. On the phone: ntfy app + subscription to the same topic.
 """
 import json
 import os
@@ -36,7 +36,7 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8",
+    "Accept-Language": "en-US,en;q=0.8",
 }
 
 _last_req = [0.0]
@@ -71,15 +71,15 @@ def _parse(proc, status, text):
         p = json.loads(text)
     except Exception:
         if status in (429, 503):
-            return "retry", f"{proc}: HTTP {status} nie-JSON (limit?)"
+            return "retry", f"{proc}: HTTP {status} non-JSON (rate limit?)"
         if status == 403:
-            return "fatal", (f"{proc}: HTTP 403 (Cloudflare blokuje ten serwer, error 1010). "
-                             f"Uruchom skrypt na domowym PC zamiast GitHub Actions.")
-        return "fatal", f"{proc}: HTTP {status} nie-JSON: {text[:200]}"
+            return "fatal", (f"{proc}: HTTP 403 (Cloudflare is blocking this server, error 1010). "
+                             f"Run the script on a home PC instead of GitHub Actions.")
+        return "fatal", f"{proc}: HTTP {status} non-JSON: {text[:200]}"
     if isinstance(p, list):
         p = p[0] if p else {}
     if not isinstance(p, dict):
-        return "fatal", f"{proc}: HTTP {status} zly ksztalt"
+        return "fatal", f"{proc}: HTTP {status} bad shape"
     if p.get("status") == 429 or p.get("statusCode") == 429:
         return "retry", f"{proc}: HTTP 429 {str(p.get('message', ''))[:120]}"
     err = p.get("error")
@@ -94,12 +94,12 @@ def _parse(proc, status, text):
         if isinstance(d, dict) and set(d.keys()) == {"json"}:
             d = d["json"]
         return "ok", d
-    return "fatal", f"{proc}: HTTP {status} nieoczekiwany ksztalt: {text[:200]}"
+    return "fatal", f"{proc}: HTTP {status} unexpected shape: {text[:200]}"
 
 
 def trpc(proc, inp=None):
     variants = [None] if inp is None else [inp, {"json": inp}]
-    last = f"{proc}: pusta odpowiedz"
+    last = f"{proc}: empty response"
     for vi, v in enumerate(variants):
         url = f"{API}/{proc}" if v is None else \
             f"{API}/{proc}?input={urllib.parse.quote(json.dumps(v, separators=(',', ':')), safe='')}"
@@ -113,7 +113,7 @@ def trpc(proc, inp=None):
                 time.sleep(2.5 * (attempt + 1))
                 continue
             if vi == 0 and v is not None and ("invalid_type" in val or "Required" in val or "Expected" in val):
-                break  # sprobuj format wrapped
+                break  # try wrapped format
             raise RuntimeError(val)
     raise RuntimeError(last)
 
@@ -197,8 +197,8 @@ def save_state(st):
 
 
 def send_ntfy(topic, title, body, click):
-    # Naglowki HTTP to latin-1, wiec tytul kodujemy RFC 2047 (ntfy to dekoduje).
-    # Dzieki temu polskie znaki i emoji przechodza bez zmian.
+    # HTTP headers are latin-1, so encode the title with RFC 2047 (ntfy decodes it).
+    # This keeps non-ASCII characters and emoji intact.
     safe_title = str(Header(title, "utf-8"))
     req = urllib.request.Request(
         f"https://ntfy.sh/{topic}", data=body.encode("utf-8"), method="POST",
@@ -257,7 +257,7 @@ def main():
                 offers.append({"need": need, "rarity": rar, "rank": row.get("rank"),
                                "battle": b, "names": names, "timing": timing, "winPts": win_pts})
 
-    # jedna bitwa = najtansze darmowe wejscie
+    # one battle = cheapest free entry
     offers.sort(key=lambda o: (o["need"], o["rank"] or 0))
     seen, best = set(), []
     for o in offers:
@@ -287,11 +287,18 @@ def main():
         per = t["perTick"] if t["perTick"] > 0 else 1
         mins = max(1, -(-(o["winPts"] - max(t["atk"], t["def"])) // per)) * 2
         lines.append(
-            f"{flag(o['names']['atkCode'])}\u2192{flag(o['names']['defCode'])} "
-            f"{o['names']['region'] or o['names']['type']} \u00b7 {o['rarity']} \u00b7 "
-            f"{o['need']} dmg \u00b7 R{t['no']} {t['wonA']}:{t['wonD']} \u00b7 ~{mins} min\n"
+            f"{flag(o['names']['atkCode'])}→{flag(o['names']['defCode'])} "
+            f"{o['names']['region'] or o['names']['type']} · {o['rarity']} · "
+            f"{o['need']} dmg · R{t['no']} {t['wonA']}:{t['wonD']} · ~{mins} min\n"
             f"{GAME_BATTLE}{o['battle'].get('_id')}")
-    title = f"\U0001F389 WarEra ZA DARMO: {len(fresh)} {'okazja' if len(fresh) == 1 else 'okazje'}"
+    n = len(fresh)
+    if n == 1:
+        noun = "okazja"
+    elif 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        noun = "okazje"
+    else:
+        noun = "okazji"
+    title = f"\U0001F389 WarEra ZA DARMO: {n} {noun}"
     body = "\n\n".join(lines)
     print(title + "\n" + body)
     if not TOPIC:

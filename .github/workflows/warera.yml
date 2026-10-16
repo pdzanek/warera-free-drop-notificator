@@ -15,14 +15,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Skanuj okazje ZA DARMO
+      - name: Scan for FREE deals
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           FREE_DMG: "1000"
           MAX_PTS_LEFT: "100"
           SEEN_HOURS: "6"
         run: python notify.py
-      - name: Zapisz stan powiadomien
+      - name: Save notification state
         run: |
           git config user.name "warera-bot"
           git config user.email "warera-bot@users.noreply.github.com"
@@ -30,4 +30,4 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "update notified.json" || exit 0
           git pull --rebase || { git rebase --abort || true; }
-          git push || echo "WARN: nie zapisano notified.json (konflikt) - powiadomienia i tak zostaly wyslane"
+          git push || echo "WARN: could not save notified.json (conflict) - notifications were still sent"
