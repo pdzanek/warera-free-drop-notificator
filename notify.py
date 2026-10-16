@@ -6,6 +6,7 @@ On GitHub Actions the topic comes from secrets.NTFY_TOPIC (see .github/workflows
 
 Requires only the Python standard library. On the phone: ntfy app + subscription to the same topic.
 """
+import base64
 import json
 import os
 import re
@@ -14,7 +15,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from email.header import Header
 
 API = "https://api2.warera.io/trpc"
 GAME_BATTLE = "https://app.warera.io/battle/"
@@ -227,9 +227,10 @@ def save_state(st):
 
 
 def send_ntfy(topic, title, body, click):
-    # HTTP headers are latin-1, so encode the title with RFC 2047 (ntfy decodes it).
-    # This keeps non-ASCII characters and emoji intact.
-    safe_title = str(Header(title, "utf-8"))
+    # HTTP headers are latin-1, so encode the title as a single RFC 2047
+    # base64 word (ntfy decodes it). Built manually on purpose: str(Header)
+    # does not encode at all, and Header.encode() may fold long lines.
+    safe_title = ("=?utf-8?b?" + base64.b64encode(title.encode("utf-8")).decode("ascii") + "?=")
     req = urllib.request.Request(
         f"https://ntfy.sh/{topic}", data=body.encode("utf-8"), method="POST",
         headers=dict(HEADERS, **{"Title": safe_title, "Priority": "high", "Tags": "tada", "Click": click}))
@@ -370,12 +371,23 @@ def main():
     if not TOPIC and not DISCORD_WEBHOOK:
         print("[dry-run] brak NTFY_TOPIC i DISCORD_WEBHOOK_URL - nie wyslano.", file=sys.stderr)
         return
+    errors = []
     if TOPIC:
-        send_ntfy(TOPIC, title, body, f"{GAME_BATTLE}{fresh[0]['battle'].get('_id')}")
-        print("wyslano na telefon.")
+        try:
+            send_ntfy(TOPIC, title, body, f"{GAME_BATTLE}{fresh[0]['battle'].get('_id')}")
+            print("wyslano na telefon.")
+        except Exception as e:
+            errors.append(f"ntfy: {e}")
+            print(f"WARN: nie wyslano na telefon: {e}", file=sys.stderr)
     if DISCORD_WEBHOOK:
-        send_discord(DISCORD_WEBHOOK, discord_embeds(title, fresh))
-        print("wyslano na Discorda.")
+        try:
+            send_discord(DISCORD_WEBHOOK, discord_embeds(title, fresh))
+            print("wyslano na Discorda.")
+        except Exception as e:
+            errors.append(f"discord: {e}")
+            print(f"WARN: nie wyslano na Discorda: {e}", file=sys.stderr)
+    if errors:
+        raise RuntimeError("; ".join(errors))
 
 
 if __name__ == "__main__":
