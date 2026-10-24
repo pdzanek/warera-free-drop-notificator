@@ -178,7 +178,7 @@ def flag(cc):
 def all_battles():
     out, cursor = [], None
     for _ in range(12):
-        inp = {"limit": 50}
+        inp = {"limit": 100, "isActive": True}
         if cursor:
             inp["cursor"] = cursor
         data = trpc("battle.getBattles", inp)
@@ -369,6 +369,8 @@ def main():
 
     offers = []
     for b in battles:
+        if b.get("type") in ("tournament", "revolution"):
+            continue
         cr = b.get("currentRound") or {}
         atk_pts = (cr.get("attacker") or {}).get("points", 0)
         def_pts = (cr.get("defender") or {}).get("points", 0)

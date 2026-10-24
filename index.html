@@ -299,7 +299,7 @@
       const all = [];
       let cursor;
       for (let page = 0; page < 12; page++) {
-        const input = { limit: 50 };
+        const input = { limit: 100, isActive: true };
         if (cursor) input.cursor = cursor;
         let data;
         try {
