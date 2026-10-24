@@ -458,13 +458,11 @@ def main():
     if not TOPIC and not DISCORD_WEBHOOK:
         print("[dry-run] brak NTFY_TOPIC i DISCORD_WEBHOOK_URL - nie wyslano.", file=sys.stderr)
         return
-    errors = []
     if TOPIC:
         try:
             send_ntfy(TOPIC, title, body, f"{GAME_BATTLE}{fresh[0]['battle'].get('_id')}")
             print("wyslano na telefon.")
         except Exception as e:
-            errors.append(f"ntfy: {e}")
             print(f"WARN: nie wyslano na telefon: {e}", file=sys.stderr)
     if DISCORD_WEBHOOK:
         try:
@@ -481,10 +479,8 @@ def main():
             cleanup_discord_messages(
                 DISCORD_WEBHOOK, [mid for mid in replaced if mid and mid not in owned])
         except Exception as e:
-            errors.append(f"discord: {e}")
             print(f"WARN: nie wyslano na Discorda: {e}", file=sys.stderr)
-    if errors:
-        raise RuntimeError("; ".join(errors))
+            raise RuntimeError(f"discord: {e}")
 
 
 if __name__ == "__main__":
