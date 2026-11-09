@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WarEra: phone notification when a 'FREE' entry appears (<1000 dmg).
+"""WarEra: phone notification when a 'FREE' entry appears (Rare <1500 dmg, Epic <50000 dmg).
 
 Local usage:  NTFY_TOPIC=my-topic python notify.py
 On GitHub Actions the topic comes from secrets.NTFY_TOPIC (see .github/workflows/warera.yml).
@@ -29,7 +29,7 @@ MIN_INTERVAL = 0.6
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "notified.json")
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
-DEFAULTS = {"max_pts_left": 100, "free_dmg": 1500, "seen_minutes": 180}
+DEFAULTS = {"max_pts_left": 100, "free_dmg": 1500, "free_dmg_epic": 50000, "seen_minutes": 180}
 
 
 def load_config():
@@ -60,6 +60,8 @@ def load_config():
 _CFG = load_config()
 
 FREE_DMG = int(os.environ.get("FREE_DMG", _CFG["free_dmg"]))
+FREE_DMG_EPIC = int(os.environ.get("FREE_DMG_EPIC", _CFG["free_dmg_epic"]))
+THRESHOLDS = {"rare": FREE_DMG, "epic": FREE_DMG_EPIC}
 MAX_LEFT = int(os.environ.get("MAX_PTS_LEFT", _CFG["max_pts_left"]))
 if "SEEN_MINUTES" in os.environ:
     SEEN_MINUTES = float(os.environ["SEEN_MINUTES"])
@@ -401,18 +403,18 @@ def main():
         for row in rows:
             code = (row.get("lootItem") or {}).get("code")
             rar = rarity_of(code)
-            if rar not in ("rare", "epic"):
+            if rar not in THRESHOLDS:
                 continue
             need = (row.get("value") or 0) + 1
-            if need < FREE_DMG:
+            if need < THRESHOLDS[rar]:
                 offers.append({"need": need, "rarity": rar, "rank": row.get("rank"),
                                "battle": b, "names": names, "timing": timing, "winPts": win_pts})
 
-    # one battle = cheapest free entry
+    # one battle + rarity = cheapest free entry
     offers.sort(key=lambda o: (o["need"], o["rank"] or 0))
     seen, best = set(), []
     for o in offers:
-        key = o["battle"].get("_id")
+        key = (o["battle"].get("_id"), o["rarity"])
         if key in seen:
             continue
         seen.add(key)
