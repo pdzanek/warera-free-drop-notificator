@@ -74,6 +74,10 @@ WEAPONS = {"knife": "common", "gun": "uncommon", "rifle": "rare",
            "sniper": "epic", "tank": "legendary", "jet": "mythic"}
 ORDER = ["common", "uncommon", "rare", "epic", "legendary", "mythic"]
 
+RARITY_EMOJI = {"rare": "🟦", "epic": "🟪"}
+RARITY_COLOR = {"rare": 0x3498DB, "epic": 0x9B59B6}
+MIXED_COLOR = 0xFFD700
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -289,15 +293,18 @@ def discord_embeds(title, offers):
     for o in offers:
         t = o["timing"]
         drop = "\U0001F4C9 " if o.get("price_drop") else ""
-        name = (f"{drop}{flag(o['names']['atkCode'])}→{flag(o['names']['defCode'])} "
+        emoji = RARITY_EMOJI.get(o["rarity"], "")
+        name = (f"{drop}{emoji} {flag(o['names']['atkCode'])}→{flag(o['names']['defCode'])} "
                 f"{o['names']['region'] or o['names']['type']} · {o['rarity']}")
         value = (f"**{o['need']} dmg** · R{t['no']} {t['wonA']}:{t['wonD']} "
                  f"· ~{eta_mins(o)} min\n"
                  f"[Otwórz bitwę]({GAME_BATTLE}{o['battle'].get('_id')})")
         fields.append({"name": name[:256], "value": value[:1024], "inline": False})
+    rarities = {o["rarity"] for o in offers}
+    color = RARITY_COLOR.get(next(iter(rarities)), MIXED_COLOR) if len(rarities) == 1 else MIXED_COLOR
     return [{
         "title": title[:256],
-        "color": 0xFFD700,
+        "color": color,
         "fields": fields[:25],
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }]
@@ -319,171 +326,4 @@ def send_discord(webhook, embeds):
             return None
 
 
-def delete_discord_message(webhook, message_id):
-    req = urllib.request.Request(
-        f"{webhook}/messages/{message_id}", method="DELETE",
-        headers={"User-Agent": HEADERS["User-Agent"]})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            r.read()
-        return True
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return True  # already gone (manual delete, replaced webhook)
-        raise
-
-
-def cleanup_discord_messages(webhook, message_ids):
-    # Best effort: cleanup must never fail the notification run.
-    for mid in dict.fromkeys(message_ids):
-        if not mid:
-            continue
-        try:
-            delete_discord_message(webhook, mid)
-        except Exception as e:
-            print(f"WARN: nie usunieto wiadomosci Discord {mid}: {e}", file=sys.stderr)
-
-
-def collect_stale_discord_ids(saved, now):
-    ids = []
-    for v in saved.values():
-        if not isinstance(v, dict) or not v.get("discord_id"):
-            continue
-        try:
-            at = float(v.get("at", 0))
-        except (TypeError, ValueError):
-            continue
-        if now - at >= SEEN_MINUTES * 60:
-            ids.append(v["discord_id"])
-    return ids
-
-
-def main():
-    cfg = trpc("gameConfig.getGameConfig")
-    round_div = (cfg.get("loot") or {}).get("damagePerLootItem", 200000)
-    win_pts = (cfg.get("battle") or {}).get("pointsToWinRound", 300)
-    countries_raw = trpc("country.getAllCountries") or []
-    regions = trpc("region.getRegionsObject") or {}
-    countries = {c.get("_id"): c for c in countries_raw if isinstance(c, dict)}
-
-    battles = all_battles()
-    print(f"zywych bitew: {len(battles)}")
-
-    offers = []
-    for b in battles:
-        if b.get("type") in ("tournament", "revolution"):
-            continue
-        cr = b.get("currentRound") or {}
-        atk_pts = (cr.get("attacker") or {}).get("points", 0)
-        def_pts = (cr.get("defender") or {}).get("points", 0)
-        left = win_pts - max(atk_pts, def_pts)
-        if not (left < MAX_LEFT):
-            continue
-        rd = (cr.get("attacker") or {}).get("damages", 0) + (cr.get("defender") or {}).get("damages", 0)
-        slots = rd // round_div
-        rid = cr.get("_id")
-        if not rid or slots <= 0:
-            continue
-        try:
-            rows = ranking_rows(rid, slots)
-        except Exception as e:
-            print(f"ranking {str(rid)[-6:]} blad: {e}", file=sys.stderr)
-            continue
-        atk_c = countries.get((b.get("attacker") or {}).get("country"), {})
-        def_c = countries.get((b.get("defender") or {}).get("country"), {})
-        region = (regions.get((b.get("defender") or {}).get("region"), {}) or {}).get("name", "")
-        names = {"atk": atk_c.get("name", "?"), "def": def_c.get("name", "?"),
-                 "atkCode": (atk_c.get("code") or "").lower(),
-                 "defCode": (def_c.get("code") or "").lower(), "region": region,
-                 "type": b.get("type", "war")}
-        timing = {"no": cr.get("number", "?"), "atk": atk_pts, "def": def_pts,
-                  "wonA": (b.get("attacker") or {}).get("wonRoundsCount", 0),
-                  "wonD": (b.get("defender") or {}).get("wonRoundsCount", 0),
-                  "perTick": ((cr.get("live") or {}).get("actualTickPoints") or 1)}
-        for row in rows:
-            code = (row.get("lootItem") or {}).get("code")
-            rar = rarity_of(code)
-            if rar not in THRESHOLDS:
-                continue
-            need = (row.get("value") or 0) + 1
-            if need < THRESHOLDS[rar]:
-                offers.append({"need": need, "rarity": rar, "rank": row.get("rank"),
-                               "battle": b, "names": names, "timing": timing, "winPts": win_pts})
-
-    # one battle + rarity = cheapest free entry
-    offers.sort(key=lambda o: (o["need"], o["rank"] or 0))
-    seen, best = set(), []
-    for o in offers:
-        key = (o["battle"].get("_id"), o["rarity"])
-        if key in seen:
-            continue
-        seen.add(key)
-        best.append(o)
-
-    now = time.time()
-    saved = load_state()
-    stale_ids = collect_stale_discord_ids(saved, now) if DISCORD_WEBHOOK else []
-    fresh, state = dedupe_offers(best, saved, now)
-    save_state(state)
-    if DISCORD_WEBHOOK:
-        cleanup_discord_messages(DISCORD_WEBHOOK, stale_ids)
-
-    if not fresh:
-        print("brak nowych okazji ZA DARMO.")
-        return
-
-    lines = []
-    for o in fresh:
-        t = o["timing"]
-        mins = eta_mins(o)
-        drop = "\U0001F4C9 " if o.get("price_drop") else ""
-        lines.append(
-            f"{drop}{flag(o['names']['atkCode'])}→{flag(o['names']['defCode'])} "
-            f"{o['names']['region'] or o['names']['type']} · {o['rarity']} · "
-            f"{o['need']} dmg · R{t['no']} {t['wonA']}:{t['wonD']} · ~{mins} min\n"
-            f"{GAME_BATTLE}{o['battle'].get('_id')}")
-    n = len(fresh)
-    if n == 1:
-        noun = "okazja"
-    elif 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-        noun = "okazje"
-    else:
-        noun = "okazji"
-    if fresh and all(o.get("price_drop") for o in fresh):
-        title = f"\U0001F4C9 Jeszcze taniej: {n} {noun}"
-    else:
-        title = f"\U0001F389 WarEra ZA DARMO: {n} {noun}"
-    # No project name in the Discord title (custom emoji did not render).
-    discord_title = title.replace("WarEra ", "")
-    body = "\n\n".join(lines)
-    print(title + "\n" + body)
-    if not TOPIC and not DISCORD_WEBHOOK:
-        print("[dry-run] brak NTFY_TOPIC i DISCORD_WEBHOOK_URL - nie wyslano.", file=sys.stderr)
-        return
-    if TOPIC:
-        try:
-            send_ntfy(TOPIC, title, body, f"{GAME_BATTLE}{fresh[0]['battle'].get('_id')}")
-            print("wyslano na telefon.")
-        except Exception as e:
-            print(f"WARN: nie wyslano na telefon: {e}", file=sys.stderr)
-    if DISCORD_WEBHOOK:
-        try:
-            message_id = send_discord(DISCORD_WEBHOOK, discord_embeds(discord_title, fresh))
-            print("wyslano na Discorda.")
-            replaced = [o.get("replace_discord_id") for o in fresh]
-            if message_id:
-                for o in fresh:
-                    key = f"{o['battle'].get('_id')}:{o['rarity']}"
-                    if key in state:
-                        state[key]["discord_id"] = message_id
-                save_state(state)
-            owned = {e.get("discord_id") for e in state.values() if isinstance(e, dict)}
-            cleanup_discord_messages(
-                DISCORD_WEBHOOK, [mid for mid in replaced if mid and mid not in owned])
-        except Exception as e:
-            print(f"WARN: nie wyslano na Discorda: {e}", file=sys.stderr)
-            raise RuntimeError(f"discord: {e}")
-
-
-if __name__ == "__main__":
-    main()
+def d
