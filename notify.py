@@ -15,6 +15,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 API = "https://api2.warera.io/trpc"
 GAME_BATTLE = "https://app.warera.io/battle/"
@@ -26,10 +28,22 @@ DISCORD_AVATAR_URL = os.environ.get("DISCORD_AVATAR_URL", "").strip()
 MAX_PAGES = 15
 MIN_INTERVAL = 0.6
 
+# Cisza nocna tylko dla ntfy (Discord dziala caly czas).
+QUIET_START = int(os.environ.get("NTFY_QUIET_START", 22))
+QUIET_END = int(os.environ.get("NTFY_QUIET_END", 6))
+LOCAL_TZ = ZoneInfo(os.environ.get("NTFY_TZ", "Europe/Warsaw"))
+
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "notified.json")
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 DEFAULTS = {"max_pts_left": 100, "free_dmg": 1500, "free_dmg_epic": 50000, "seen_minutes": 180}
+
+
+def ntfy_quiet_now():
+    h = datetime.now(LOCAL_TZ).hour
+    if QUIET_START > QUIET_END:  # okno przez polnoc, np. 22-6
+        return h >= QUIET_START or h < QUIET_END
+    return QUIET_START <= h < QUIET_END
 
 
 def load_config():
@@ -469,7 +483,9 @@ def main():
     if not TOPIC and not DISCORD_WEBHOOK:
         print("[dry-run] brak NTFY_TOPIC i DISCORD_WEBHOOK_URL - nie wyslano.", file=sys.stderr)
         return
-    if TOPIC:
+    if TOPIC and ntfy_quiet_now():
+        print("cisza nocna - pomijam ntfy.")
+    elif TOPIC:
         try:
             send_ntfy(TOPIC, title, body, f"{GAME_BATTLE}{fresh[0]['battle'].get('_id')}")
             print("wyslano na telefon.")
